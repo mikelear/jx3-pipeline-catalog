@@ -16,6 +16,12 @@ spec:
             value: /tekton/home/npm/.npmrc
           - name: HOME
             value: /tekton/home
+          - name: CLUSTER_ID
+            valueFrom:
+              configMapKeyRef:
+                name: ai-review-cluster-config
+                key: CLUSTER_ID
+                optional: true
           envFrom:
           - secretRef:
               name: jx-boot-job-env-vars
@@ -44,7 +50,7 @@ spec:
           resources: {}
           script: |
             #!/usr/bin/env sh
-            jx-release-version --tag > VERSION
+            jx-release-version > VERSION
         - image: ghcr.io/jenkins-x/jx-boot:3.16.59
           name: jx-variables
           resources:
@@ -95,8 +101,10 @@ spec:
 
             git add * || true
             git commit -a -m "chore: release $VERSION" --allow-empty
-            git tag -fa v$VERSION -m "Release version $VERSION"
-            git push --force origin v$VERSION
+            TAG_SUFFIX=""
+            if [ -n "$CLUSTER_ID" ]; then TAG_SUFFIX="-$CLUSTER_ID"; fi
+            git tag -fa v${VERSION}${TAG_SUFFIX} -m "Release version ${VERSION}${TAG_SUFFIX}"
+            git push --force origin v${VERSION}${TAG_SUFFIX}
 
             jx changelog create --version v${VERSION} --output-markdown ../changelog.md
         - image: ghcr.io/jenkins-x/jx-boot:3.16.59
