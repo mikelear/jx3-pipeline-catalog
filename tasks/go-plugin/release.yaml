@@ -92,7 +92,8 @@ spec:
             jx gitops yset -p 'image.tag' -v "$VERSION" -f ./charts/$REPO_NAME/values.yaml;
             else echo no charts; fi
 
-            jx changelog create --verbose --version=$VERSION --rev=$PULL_BASE_SHA --output-markdown=changelog.md --update-release=true
+            CSUFFIX=""; if [ -n "$CLUSTER_ID" ]; then CSUFFIX="-$CLUSTER_ID"; fi
+            jx changelog create --verbose --version=${VERSION}${CSUFFIX} --rev=$PULL_BASE_SHA --output-markdown=changelog.md --update-release=true
         - image: ghcr.io/jenkins-x/jx-boot:3.16.59
           name: release-chart
           resources: {}

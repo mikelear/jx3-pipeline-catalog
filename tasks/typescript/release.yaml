@@ -106,7 +106,7 @@ spec:
             git tag -fa v${VERSION}${TAG_SUFFIX} -m "Release version ${VERSION}${TAG_SUFFIX}"
             git push --force origin v${VERSION}${TAG_SUFFIX}
 
-            jx changelog create --version v${VERSION} --output-markdown ../changelog.md
+            jx changelog create --version v${VERSION}${TAG_SUFFIX} --output-markdown ../changelog.md
         - image: ghcr.io/jenkins-x/jx-boot:3.16.59
           name: promote-helm-release
           resources: {}
