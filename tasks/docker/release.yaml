@@ -14,6 +14,12 @@ spec:
           env:
           - name: HOME
             value: /tekton/home
+          - name: CLUSTER_ID
+            valueFrom:
+              configMapKeyRef:
+                name: ai-review-cluster-config
+                key: CLUSTER_ID
+                optional: true
           envFrom:
           - secretRef:
               name: jx-boot-job-env-vars
@@ -78,10 +84,12 @@ spec:
 
             git add * || true
             git commit -a -m "chore: release $VERSION" --allow-empty
-            git tag -fa v$VERSION -m "Release version $VERSION"
-            git push --force origin v$VERSION
+            TAG_SUFFIX=""
+            if [ -n "$CLUSTER_ID" ]; then TAG_SUFFIX="-$CLUSTER_ID"; fi
+            git tag -fa v${VERSION}${TAG_SUFFIX} -m "Release version ${VERSION}${TAG_SUFFIX}"
+            git push --force origin v${VERSION}${TAG_SUFFIX}
 
-            jx changelog create --version v${VERSION}
+            jx changelog create --version v${VERSION}${TAG_SUFFIX}
   podTemplate: {}
   serviceAccountName: tekton-bot
   timeout: 12h0m0s
