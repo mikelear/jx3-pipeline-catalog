@@ -74,6 +74,13 @@ spec:
             #!/usr/bin/env sh
             source .jx/variables.sh
 
+            # Git 2.35.2+ refuses to operate on a repo whose filesystem owner differs from the
+            # process uid. Tekton steps in a pod can run as different uids than git-clone did,
+            # which intermittently breaks the chart yset / commit / tag / push sequence below
+            # with `fatal: detected dubious ownership in repository at '/workspace/source'`.
+            # Marking the workspace safe is the documented fix.
+            git config --global --add safe.directory /workspace/source
+
             if [ -d "charts/$REPO_NAME" ]; then
             jx gitops yset -p version -v "$VERSION" -f ./charts/$REPO_NAME/Chart.yaml
             jx gitops yset -p appVersion -v "$VERSION" -f ./charts/$REPO_NAME/Chart.yaml
