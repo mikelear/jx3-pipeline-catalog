@@ -46,10 +46,27 @@ spec:
         - image: gcr.io/kaniko-project/executor:v1.9.1-debug
           name: build-container-build
           resources: {}
+          env:
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tekton-git
+                  key: password
+                  optional: true
           script: |
             #!/busybox/sh
+            set -e
             source .jx/variables.sh
-            cp /tekton/creds/.docker/config.json /kaniko/.docker/config.json
+            # Build Docker config with cluster registry + ghcr.io auth so kaniko
+            # can pull FROM-images on ghcr.io/mikelear/* (e.g. leartech-agent-go).
+            # Mirrors the auth pattern leartech-dockerfiles/*/release.yaml uses.
+            sed 's/"credHelpers":{[^}]*},//' /tekton/creds/.docker/config.json > /workspace/docker-config.json
+            if [ -n "$GIT_TOKEN" ]; then
+              GHCR_AUTH=$(printf "mikelear:%s" "$GIT_TOKEN" | base64)
+              cat /workspace/docker-config.json | sed "s/\"auths\":{/\"auths\":{\"ghcr.io\":{\"auth\":\"${GHCR_AUTH}\"},/" > /kaniko/.docker/config.json
+            else
+              cp /workspace/docker-config.json /kaniko/.docker/config.json
+            fi
             /kaniko/executor $KANIKO_FLAGS --context=/workspace/source --dockerfile=${DOCKERFILE_PATH:-Dockerfile} --destination=$PUSH_CONTAINER_REGISTRY/$DOCKER_REGISTRY_ORG/$APP_NAME:$VERSION
         - image: ghcr.io/jenkins-x-plugins/jx-preview:0.7.3
           name: promote-jx-preview
