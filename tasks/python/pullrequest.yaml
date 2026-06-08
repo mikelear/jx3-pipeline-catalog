@@ -39,6 +39,14 @@ spec:
           resources: {}
           script: |
             #!/bin/sh
+            # `set -e` ensures any test/exit failure propagates the non-zero
+            # exit so Tekton marks the step Failed. Critical for repos that
+            # override this step with a multi-command pytest+coverage pattern:
+            # without `set -e`, a non-zero `pytest` followed by a successful
+            # `coverage report` lets the step exit 0 → silent test failure
+            # → release pytest catches it later. Discovered 2026-06-08 on
+            # leartech-orchestrator PR #38.
+            set -e
             python -m unittest
         - image: ghcr.io/jenkins-x/jx-registry:0.1.17
           name: check-registry
