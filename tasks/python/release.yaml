@@ -39,6 +39,12 @@ spec:
           resources: {}
           script: |
             #!/usr/bin/env sh
+            # `set -e` is mandatory on every script block in this task.
+            # Memory: feedback_pr_pytest_step_must_set_e (2026-06-08).
+            # Without it, a non-zero exit followed by a successful command
+            # lets the step silently pass — masking real failures and
+            # propagating phantom state to downstream steps.
+            set -e
             jx-release-version --tag > VERSION
         - image: ghcr.io/jenkins-x/jx-boot:3.16.59
           name: jx-variables
@@ -49,12 +55,14 @@ spec:
               memory: 512Mi
           script: |
             #!/usr/bin/env sh
+            set -e
             jx gitops variables
         - image: python:3.6.12-alpine
           name: build-python-unittest
           resources: {}
           script: |
             #!/bin/sh
+            set -e
             python -m unittest
         - image: ghcr.io/jenkins-x/jx-registry:0.1.17
           name: check-registry
@@ -64,14 +72,80 @@ spec:
           resources: {}
           script: |
             #!/busybox/sh
+            set -e
             source .jx/variables.sh
             cp /tekton/creds/.docker/config.json /kaniko/.docker/config.json
             /kaniko/executor $KANIKO_FLAGS --context=/workspace/source --dockerfile=${DOCKERFILE_PATH:-Dockerfile} --destination=$PUSH_CONTAINER_REGISTRY/$DOCKER_REGISTRY_ORG/$APP_NAME:$VERSION
+        # ---------------------------------------------------------------
+        # Phantom-pin prevention gate — discovered 2026-06-08 on a 95-min
+        # stall where kaniko reported success but the image was missing
+        # from the destination registry. `jx-promote` then opened a
+        # GitOps PR pinning a non-existent tag, which permanently broke
+        # downstream environments.
+        #
+        # Memory: feedback_failed_release_must_not_propagate_pin.
+        #
+        # This step runs BEFORE every promote-* step (promote-changelog
+        # tags git, promote-helm-release publishes the chart, and
+        # promote-jx-promote opens the GitOps PR). In Tekton, steps within
+        # a task run sequentially; a non-zero exit halts the task. So
+        # placing this step before the promote chain is the mechanical
+        # gate — there is no `runAfter` at the step level in Tekton, step
+        # ordering IS the dependency.
+        #
+        # Image: crane/debug — pinned to the same SHA already used by
+        # tasks/build-scan-push/build-scan-push.yaml so it's cached on
+        # both clusters.
+        # ---------------------------------------------------------------
+        - image: gcr.io/go-containerregistry/crane/debug:c195f151efe3369874c72662cd69ad43ee485128
+          name: verify-image-pullable
+          resources: {}
+          script: |
+            #!/busybox/sh
+            set -e
+            source .jx/variables.sh
+
+            # Reuse the dockerconfig kaniko built. crane honours
+            # ~/.docker/config.json by default; HOME=/tekton/home in this
+            # task's stepTemplate.
+            mkdir -p /tekton/home/.docker
+            if [ -f /tekton/creds/.docker/config.json ]; then
+              cp /tekton/creds/.docker/config.json /tekton/home/.docker/config.json
+            else
+              echo "warn: /tekton/creds/.docker/config.json not present; relying on tekton-bot SA imagePullSecrets"
+            fi
+
+            PRIMARY="${PUSH_CONTAINER_REGISTRY}/${DOCKER_REGISTRY_ORG}/${APP_NAME}:${VERSION}"
+
+            # The python catalog task only pushes to a single registry by
+            # default ($PUSH_CONTAINER_REGISTRY). Consumer release
+            # pipelines that mirror to additional registries (e.g.
+            # GAR + ACR + ghcr.io) should override this step or extend
+            # REGISTRIES_TO_VERIFY (space-separated list of full image refs).
+            #
+            # TODO: lift the multi-registry list into a task param once a
+            # consumer has the need — keeping it env-var driven for now to
+            # avoid a breaking schema change.
+            REGISTRIES_TO_VERIFY="${REGISTRIES_TO_VERIFY:-$PRIMARY}"
+
+            for REGISTRY_URL in $REGISTRIES_TO_VERIFY; do
+              echo "checking $REGISTRY_URL"
+              if ! crane manifest "$REGISTRY_URL" >/dev/null 2>&1; then
+                echo "ERROR: image not pullable from $REGISTRY_URL — aborting jx-promote"
+                echo "       phantom-pin condition: kaniko reported success but the"
+                echo "       manifest is not retrievable. Promotion blocked to prevent"
+                echo "       a downstream GitOps PR pinning a non-existent tag."
+                exit 1
+              fi
+              echo "OK: $REGISTRY_URL manifest retrieved"
+            done
+            echo "all registries return a manifest for ${VERSION} — safe to promote"
         - image: ghcr.io/jenkins-x/jx-boot:3.16.59
           name: promote-changelog
           resources: {}
           script: |
             #!/usr/bin/env sh
+            set -e
             source .jx/variables.sh
 
             # Git 2.35.2+ refuses to operate on a repo whose filesystem owner differs from the
@@ -100,6 +174,7 @@ spec:
           resources: {}
           script: |
             #!/usr/bin/env sh
+            set -e
             source .jx/variables.sh
             jx gitops helm release
         - image: ghcr.io/jenkins-x-plugins/jx-promote:0.6.33
@@ -107,6 +182,7 @@ spec:
           resources: {}
           script: |
             #!/usr/bin/env sh
+            set -e
             source .jx/variables.sh
             jx promote -b --all --timeout 1h --no-poll --add-changelog ../changelog.md
   podTemplate: {}
